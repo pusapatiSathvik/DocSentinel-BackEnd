@@ -15,7 +15,7 @@ app.use(cors()); // Allow cross-origin requests from the React frontend
 // Define Routes
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/dashboard', require('./routes/dashboard')); // Protected routes
-
+app.use('/api/documents', require('./routes/documents'));
 // Simple default route
 app.get('/', (req, res) => res.send('API Running'));
 
