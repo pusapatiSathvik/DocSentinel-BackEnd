@@ -12,6 +12,7 @@ const auth = require('../middleware/auth');
 const User = require('../models/User');
 const Institute = require('../models/Institute');
 const PendingConnection = require('../models/PendingConnection');
+const Group = require('../models/Group');
 
 // =========================================================
 // USER ROUTES (Requires 'user' role)
@@ -182,15 +183,76 @@ router.get('/institute/rejected', auth, async (req, res) => {
     }
 });
 
+
+// @route   GET api/dashboard/institute/groups
+// @desc    Get all existing groups for the current institute
+// @access  Private (Institute)
+router.get('/institute/groups', auth, async (req, res) => {
+    if (req.user.role !== 'institute') return res.status(403).json({ msg: 'Forbidden: Institute access required' });
+    
+    try {
+        const instituteId = req.user.id;
+        console.log(`Fetching groups for institute: ${instituteId}`); // Backend log
+        const groups = await Group.find({ institute: instituteId })
+            .select('name members createdAt')
+            .populate({
+                path: 'members',
+                model: 'user',
+                select: 'name email _id'
+            })
+            .lean(); // Use lean() for faster read operations if you don't need Mongoose setters
+        console.log(`Successfully fetched ${groups.length} groups.`); // Backend log
+        res.json(groups);
+    } catch (err) {
+        onsole.error('SERVER ERROR fetching groups:', err.message); // Backend error log
+        res.status(500).send('Server error');
+    }
+});
+
+
 // @route   PUT api/dashboard/institute/approve/:userId
 // @desc    Approve a pending user request
 // @access  Private (Institute)
 router.put('/institute/approve/:userId', auth, async (req, res) => {
     if (req.user.role !== 'institute') return res.status(403).json({ msg: 'Forbidden: Institute access required' });
 
+    const { groupId, newGroupName } = req.body; 
+    console.log("approve req");
+    console.log(groupId);
+    console.log(newGroupName);
+
+    if (!groupId && !newGroupName) {
+        return res.status(400).json({ msg: 'Group assignment is mandatory for approval. Provide groupId or newGroupName.' });
+    }
+
     try {
         const userId = req.params.userId;
         const instituteId = req.user.id;
+        let group;
+        if (newGroupName) {
+            // Check if group already exists (optional, but good practice)
+            let existingGroup = await Group.findOne({ institute: instituteId, name: newGroupName.trim() });
+            if (existingGroup) {
+                 return res.status(400).json({ msg: `Group "${newGroupName}" already exists. Use the existing group option.` });
+            }
+            group = new Group({
+                institute: instituteId,
+                name: newGroupName.trim(),
+                members: [userId] // Add user to the new group immediately
+            });
+            await group.save();
+        } 
+        // 2. Handle EXISTING Group Assignment
+        else if (groupId) {
+            group = await Group.findById(groupId);
+            if (!group) return res.status(404).json({ msg: 'Group not found.' });
+            
+            // Add user to the existing group if not already a member (safety check)
+            if (!group.members.includes(userId)) {
+                group.members.push(userId);
+                await group.save();
+            }
+        }
 
         // 1. Update the pending request status
         const connection = await PendingConnection.findOneAndUpdate(
